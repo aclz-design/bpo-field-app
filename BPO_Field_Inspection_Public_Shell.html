@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>BPO Field Inspection</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;color:#111;background:#f4f5f7}
+*{box-sizing:border-box} body{margin:0;background:#f4f5f7}
+header{position:sticky;top:0;z-index:5;background:white;border-bottom:1px solid #ddd;padding:14px 18px}
+h1{font-size:24px;margin:0 0 4px} small{color:#666}
+main{max-width:900px;margin:auto;padding:14px}
+.card{background:white;border:1px solid #ddd;border-radius:16px;padding:16px;margin-bottom:14px}
+.hidden{display:none!important}
+textarea{width:100%;font:inherit;font-size:18px;border:1px solid #bbb;border-radius:12px;padding:12px;background:#fff;min-height:130px}
+button{font:inherit}
+.primary,.secondary{width:100%;border:0;border-radius:14px;padding:15px 16px;font-size:18px;font-weight:700;margin-top:10px;touch-action:manipulation}
+.primary{background:#0a84ff;color:#fff}.secondary{background:#e9eaec;color:#111}
+.route{width:100%;text-align:left;border:1px solid #bbb;background:#fff;border-radius:14px;padding:16px;margin:8px 0;touch-action:manipulation}
+.route b{display:block;font-size:20px;margin-bottom:5px;color:#0a84ff}.route span{color:#555}
+.topline{font-weight:700;font-size:18px;margin-bottom:12px}.section-title{font-size:22px;margin:4px 0 12px}
+.field{margin:16px 0}.label{font-weight:700;margin-bottom:7px}
+.choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.choice{border:1px solid #aaa;background:#fff;border-radius:12px;padding:13px 8px;font-size:16px;min-height:48px}
+.choice.selected{background:#111;color:#fff;border-color:#111}
+.note{font-size:14px;color:#666;line-height:1.35}
+.badge{display:inline-block;background:#eef5ff;color:#065db8;border-radius:999px;padding:5px 9px;font-size:13px;font-weight:700}
+@media(min-width:700px){.choices{grid-template-columns:repeat(4,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<header>
+<h1>BPO Field Inspection</h1>
+<small>Route and inspection data stay in this browser on this device.</small>
+</header>
+<main>
+<section id="setup" class="card">
+<h2 class="section-title">Today's Route</h2>
+<p class="note">Paste one property per line using:<br><b>Prop ID | Street Address | City, State ZIP</b></p>
+<textarea id="routeInput" placeholder="3952011 | 2511 NW 25th Ave | Miami, FL 33142"></textarea>
+<button id="loadRoute" class="primary">Load Today's Route</button>
+<button id="restoreRoute" class="secondary">Restore Saved Route</button>
+</section>
+
+<section id="routeScreen" class="card hidden">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+<h2 class="section-title" style="margin:0">Today's Route</h2><span class="badge" id="routeCount"></span>
+</div>
+<div id="routeList"></div>
+<button id="editRoute" class="secondary">Edit Route</button>
+</section>
+
+<section id="formScreen" class="hidden">
+<div class="card"><div class="topline" id="subjectLine"></div><div id="subjectMeta" class="note"></div></div>
+<div class="card"><h2 class="section-title">Neighborhood</h2><div id="neighborhoodFields"></div></div>
+<div class="card"><h2 class="section-title">Subject</h2><div id="subjectFields"></div></div>
+<div class="card">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+<h2 class="section-title" style="margin:0">Condition</h2>
+<button id="allAverage" style="border:0;border-radius:10px;padding:10px 12px;font-weight:700">Set All Average</button>
+</div>
+<div id="conditionFields"></div>
+</div>
+<div class="card">
+<h2 class="section-title">Field Comments</h2>
+<div class="field"><div class="label">Subject condition</div><textarea data-text="subject_condition"></textarea></div>
+<div class="field"><div class="label">Negative conditions</div><textarea data-text="negative_conditions"></textarea></div>
+<div class="field"><div class="label">Repairs needed</div><textarea data-text="repairs_needed"></textarea></div>
+<div class="field"><div class="label">Repairs recommended</div><textarea data-text="repairs_recommended"></textarea></div>
+<div class="field"><div class="label">Assignment-specific comments</div><textarea data-text="assignment_comments"></textarea></div>
+</div>
+<div class="card">
+<button id="saveInspection" class="primary">Save Inspection</button>
+<button id="backRoute" class="secondary">Back to Route</button>
+<button id="copySummary" class="secondary">Copy Field Summary</button>
+</div>
+</section>
+</main>
+
+<script>
+const NEIGHBORHOOD = [
+["Cleanliness",["Poor","Fair","Average","Good","Excellent"]],
+["Streets / Public Spaces",["Poor","Fair","Average","Well Maintained","Excellent"]],
+["Home Maintenance",["Poor","Fair","Average","Good","Excellent"]],
+["Neighborhood Type",["SFR","Condo / Townhome","Mixed","Multifamily","Commercial Mix","Rural","Other","Unknown"]],
+["Influence / Amenities",["Residential","Canal","Lake","Golf","Gated","Park","Waterfront","Other"]],
+["Negative Influence",["None","Arterial Road","Railroad Tracks","Power Lines","Commercial","Industrial","Deferred Maintenance","Other"]],
+["Perimeter / Access",["Residential Street","Collector","Arterial","Cul-de-sac","Corner","Gated","Private Road","Other"]]
+];
+const SUBJECT = [
+["Color",["White","Beige","Gray","Tan","Brown","Yellow","Blue","Other"]],
+["Property Type",["Detached SFR","Attached SFR","Condo","Townhouse","Duplex","Triplex","Fourplex","Multifamily"]],
+["Construction",["CBS / Stucco","Frame / Stucco","Frame","Poured Concrete","Concrete / Steel","Glass / Concrete","Masonry","Other"]],
+["Floors",["1","2","3","Split Level","Low-rise","Mid-rise","High-rise","Other"]],
+["Style",["Ranch","Contemporary","Flat Roof","Mediterranean","Traditional","Low-rise","Mid-rise","High-rise"]],
+["Roof",["Tile","Shingle","Built-up","Flat","Metal","Concrete","Mixed","Other"]],
+["Parking",["None","Driveway","Carport","1-Car Garage","2-Car Garage","3-Car Garage","Parking Lot","Other"]]
+];
+const CONDITIONS = ["Roof","Trim","Exterior Paint","Windows","Front Door","Awnings","Fence","Lawn / Landscape","Overall Condition"];
+const RATING = ["Poor","Fair","Average","Good","Excellent"];
+
+let route=[], current=null, answers={};
+
+function makeKey(label){return label.toLowerCase().replace(/[^a-z0-9]+/g,"_").replace(/^_|_$/g,"")}
+function renderField(container,label,choices,group){
+  const wrap=document.createElement("div"); wrap.className="field";
+  const lab=document.createElement("div"); lab.className="label"; lab.textContent=label; wrap.appendChild(lab);
+  const box=document.createElement("div"); box.className="choices";
+  const key=group+"."+makeKey(label);
+  choices.forEach(v=>{
+    const b=document.createElement("button"); b.type="button"; b.className="choice"; b.textContent=v;
+    b.dataset.key=key; b.dataset.value=v; b.addEventListener("click",()=>selectChoice(b)); box.appendChild(b);
+  });
+  wrap.appendChild(box); container.appendChild(wrap);
+}
+function selectChoice(btn){
+  const key=btn.dataset.key;
+  document.querySelectorAll('[data-key="'+key+'"]').forEach(x=>x.classList.remove("selected"));
+  btn.classList.add("selected"); answers[key]=btn.dataset.value;
+}
+function renderFormFields(){
+  const n=document.getElementById("neighborhoodFields"), s=document.getElementById("subjectFields"), c=document.getElementById("conditionFields");
+  n.innerHTML=s.innerHTML=c.innerHTML="";
+  NEIGHBORHOOD.forEach(([l,ch])=>renderField(n,l,ch,"neighborhood"));
+  SUBJECT.forEach(([l,ch])=>renderField(s,l,ch,"subject"));
+  CONDITIONS.forEach(l=>renderField(c,l,RATING,"condition"));
+}
+function parseRoute(text){
+  return text.split(/\n+/).map(x=>x.trim()).filter(Boolean).map(line=>{
+    const p=line.split("|").map(x=>x.trim()); if(p.length<3) return null;
+    return {id:p[0],address:p[1],city:p.slice(2).join(" | ")};
+  }).filter(Boolean);
+}
+function showRoute(){
+  document.getElementById("setup").classList.add("hidden");
+  document.getElementById("formScreen").classList.add("hidden");
+  document.getElementById("routeScreen").classList.remove("hidden");
+  const list=document.getElementById("routeList"); list.innerHTML="";
+  route.forEach((p,i)=>{
+    const b=document.createElement("button"); b.type="button"; b.className="route";
+    b.innerHTML="<b>"+p.address+"</b><span>"+p.city+" · Prop ID "+p.id+"</span>";
+    b.addEventListener("click",()=>openProperty(i)); list.appendChild(b);
+  });
+  document.getElementById("routeCount").textContent=route.length+" properties";
+}
+function openProperty(i){
+  current=route[i];
+  answers=JSON.parse(localStorage.getItem("inspection:"+current.id)||"{}");
+  document.getElementById("routeScreen").classList.add("hidden");
+  document.getElementById("formScreen").classList.remove("hidden");
+  document.getElementById("subjectLine").textContent=current.address;
+  document.getElementById("subjectMeta").textContent=current.city+" · Prop ID "+current.id;
+  document.querySelectorAll(".choice").forEach(b=>b.classList.toggle("selected",answers[b.dataset.key]===b.dataset.value));
+  document.querySelectorAll("[data-text]").forEach(t=>t.value=answers["text."+t.dataset.text]||"");
+  window.scrollTo(0,0);
+}
+function saveCurrent(){
+  if(!current) return;
+  document.querySelectorAll("[data-text]").forEach(t=>answers["text."+t.dataset.text]=t.value);
+  answers._subject=current; answers._saved=new Date().toISOString();
+  localStorage.setItem("inspection:"+current.id,JSON.stringify(answers));
+}
+function allAverage(){
+  CONDITIONS.forEach(l=>{
+    const key="condition."+makeKey(l); answers[key]="Average";
+    document.querySelectorAll('[data-key="'+key+'"]').forEach(b=>b.classList.toggle("selected",b.dataset.value==="Average"));
+  });
+}
+function summary(){
+  saveCurrent();
+  let out="BPO FIELD INSPECTION\nProp ID: "+current.id+"\n"+current.address+"\n"+current.city+"\n\n";
+  Object.keys(answers).filter(k=>!k.startsWith("_")).sort().forEach(k=>{const v=answers[k]; if(v) out+=k+": "+v+"\n";});
+  return out;
+}
+renderFormFields();
+document.getElementById("loadRoute").addEventListener("click",()=>{
+  const parsed=parseRoute(document.getElementById("routeInput").value);
+  if(!parsed.length){alert("Enter at least one property using: Prop ID | Address | City, State ZIP");return}
+  route=parsed; localStorage.setItem("bpoRoute",JSON.stringify(route)); showRoute();
+});
+document.getElementById("restoreRoute").addEventListener("click",()=>{
+  route=JSON.parse(localStorage.getItem("bpoRoute")||"[]");
+  if(!route.length){alert("No saved route found on this iPad.");return} showRoute();
+});
+document.getElementById("editRoute").addEventListener("click",()=>{
+  document.getElementById("routeInput").value=route.map(p=>p.id+" | "+p.address+" | "+p.city).join("\n");
+  document.getElementById("routeScreen").classList.add("hidden"); document.getElementById("setup").classList.remove("hidden");
+});
+document.getElementById("backRoute").addEventListener("click",()=>{saveCurrent();showRoute()});
+document.getElementById("saveInspection").addEventListener("click",()=>{saveCurrent();alert("Inspection saved on this iPad.")});
+document.getElementById("allAverage").addEventListener("click",allAverage);
+document.getElementById("copySummary").addEventListener("click",async()=>{
+  const txt=summary(); try{await navigator.clipboard.writeText(txt); alert("Field summary copied.");}
+  catch(e){prompt("Copy this summary:",txt)}
+});
+</script>
+</body>
+</html>
