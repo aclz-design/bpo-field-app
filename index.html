@@ -14,6 +14,8 @@ main{max-width:900px;margin:auto;padding:14px}
 .hidden{display:none!important}
 textarea{width:100%;font:inherit;font-size:18px;border:1px solid #bbb;border-radius:12px;padding:12px;background:#fff;min-height:130px}
 button{font:inherit}
+summary{padding:16px 0;cursor:pointer;font-weight:600}
+button:disabled{opacity:.6}
 .primary,.secondary{width:100%;border:0;border-radius:14px;padding:15px 16px;font-size:18px;font-weight:700;margin-top:10px;touch-action:manipulation}
 .primary{background:#0a84ff;color:#fff}.secondary{background:#e9eaec;color:#111}
 .route{width:100%;text-align:left;border:1px solid #bbb;background:#fff;border-radius:14px;padding:16px;margin:8px 0;touch-action:manipulation}
@@ -32,13 +34,20 @@ button{font:inherit}
 <header>
 <h1>BPO Field Inspection</h1>
 <small>Route and inspection data stay in this browser on this device.</small>
+<div class="note" id="appVersion">Version 3 · CSV route loading</div>
 </header>
 <main>
+<div id="appStatus" class="card hidden" role="status" aria-live="polite"></div>
 <section id="setup" class="card">
 <h2 class="section-title">Today's Route</h2>
+<button id="chooseRouteCSV" class="primary">Load Route CSV</button>
+<input id="routeCSVFile" type="file" accept=".csv,text/csv" class="hidden" aria-label="Choose the planner route CSV">
+<p class="note">Choose <b>BPO_iPad_Route.csv</b> from Files → Dropbox. Loading a route keeps your saved inspections.</p>
+<details><summary>Or paste route lines</summary>
 <p class="note">Paste one property per line using:<br><b>Prop ID | Street Address | City, State ZIP</b></p>
-<textarea id="routeInput" placeholder="3952011 | 2511 NW 25th Ave | Miami, FL 33142"></textarea>
-<button id="loadRoute" class="primary">Load Today's Route</button>
+<textarea id="routeInput" aria-label="Route lines" placeholder="12345678 | 100 Example St Apt 2 | Miami, FL 33101"></textarea>
+<button id="loadRoute" class="secondary">Load Pasted Route</button>
+</details>
 <button id="restoreRoute" class="secondary">Restore Saved Route</button>
 </section>
 
@@ -63,13 +72,15 @@ button{font:inherit}
 </div>
 <div class="card">
 <h2 class="section-title">Field Comments</h2>
-<div class="field"><div class="label">Subject condition</div><textarea data-text="subject_condition"></textarea></div>
-<div class="field"><div class="label">Negative conditions</div><textarea data-text="negative_conditions"></textarea></div>
-<div class="field"><div class="label">Repairs needed</div><textarea data-text="repairs_needed"></textarea></div>
-<div class="field"><div class="label">Repairs recommended</div><textarea data-text="repairs_recommended"></textarea></div>
-<div class="field"><div class="label">Assignment-specific comments</div><textarea data-text="assignment_comments"></textarea></div>
+<p class="note">For a commercial property, record its use and any additional details in Assignment-specific comments.</p>
+<div class="field"><div class="label">Subject condition</div><textarea aria-label="Inspection comments" data-text="subject_condition"></textarea></div>
+<div class="field"><div class="label">Negative conditions</div><textarea aria-label="Inspection comments" data-text="negative_conditions"></textarea></div>
+<div class="field"><div class="label">Repairs needed</div><textarea aria-label="Inspection comments" data-text="repairs_needed"></textarea></div>
+<div class="field"><div class="label">Repairs recommended</div><textarea aria-label="Inspection comments" data-text="repairs_recommended"></textarea></div>
+<div class="field"><div class="label">Assignment-specific comments</div><textarea aria-label="Inspection comments" data-text="assignment_comments"></textarea></div>
 </div>
 <div class="card">
+<p id="inspectionStatus" class="note" role="status" aria-live="polite"></p>
 <button id="saveInspection" class="primary">Save Inspection</button>
 <button id="saveFile" class="secondary">Save Inspection File</button>
 <button id="backRoute" class="secondary">Back to Route</button>
@@ -90,7 +101,7 @@ const NEIGHBORHOOD = [
 ];
 const SUBJECT = [
 ["Color",["White","Beige","Gray","Tan","Brown","Yellow","Blue","Other"]],
-["Property Type",["Detached SFR","Attached SFR","Condo","Townhouse","Duplex","Triplex","Fourplex","Multifamily"]],
+["Property Type",["Detached SFR","Attached SFR","Condo","Townhouse","Duplex","Triplex","Fourplex","Multifamily","Commercial / Other"]],
 ["Construction",["CBS / Stucco","Frame / Stucco","Frame","Poured Concrete","Concrete / Steel","Glass / Concrete","Masonry","Other"]],
 ["Floors",["1","2","3","Split Level","Low-rise","Mid-rise","High-rise","Other"]],
 ["Style",["Ranch","Contemporary","Flat Roof","Mediterranean","Traditional","Low-rise","Mid-rise","High-rise"]],
@@ -117,7 +128,7 @@ function renderField(container,label,choices,group){
 function selectChoice(btn){
   const key=btn.dataset.key;
   document.querySelectorAll('[data-key="'+key+'"]').forEach(x=>x.classList.remove("selected"));
-  btn.classList.add("selected"); answers[key]=btn.dataset.value;
+  btn.classList.add("selected"); answers[key]=btn.dataset.value; persistCurrent();
 }
 function renderFormFields(){
   const n=document.getElementById("neighborhoodFields"), s=document.getElementById("subjectFields"), c=document.getElementById("conditionFields");
@@ -126,12 +137,96 @@ function renderFormFields(){
   SUBJECT.forEach(([l,ch])=>renderField(s,l,ch,"subject"));
   CONDITIONS.forEach(l=>renderField(c,l,RATING,"condition"));
 }
-function parseRoute(text){
-  return text.split(/\n+/).map(x=>x.trim()).filter(Boolean).map(line=>{
-    const p=line.split("|").map(x=>x.trim()); if(p.length<3) return null;
-    return {id:p[0],address:p[1],city:p.slice(2).join(" | ")};
-  }).filter(Boolean);
+function showStatus(message,isError=false){
+  const box=document.getElementById("appStatus");
+  box.textContent=message; box.classList.remove("hidden");
+  box.style.borderColor=isError?"#b42318":"#bbb";
+  box.style.color=isError?"#9b1c14":"#111";
+  box.setAttribute("role",isError?"alert":"status");
+  const detail=document.getElementById("inspectionStatus");
+  if(detail&&!document.getElementById("formScreen").classList.contains("hidden")){
+    detail.textContent=message;detail.style.color=box.style.color;
+  }
 }
+async function runAction(action){
+  try { await action(); } catch(error) { showStatus(error.message||"The action could not be completed. Your saved inspections have not been cleared.",true); }
+}
+function parseCSV(text){
+  text=text.replace(/^\uFEFF/,"");
+  const rows=[]; let row=[],field="",quoted=false,closed=false,started=false;
+  function finishField(){row.push(field);field="";closed=false;started=false;}
+  function finishRow(){if(row.some(value=>value.trim()!=="")) rows.push(row);row=[];}
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(quoted){
+      if(ch==='"'){
+        if(text[i+1]==='"'){field+='"';i++;}
+        else {quoted=false;closed=true;}
+      } else field+=ch;
+    } else if(ch===","||ch==="\r"||ch==="\n"){
+      finishField();
+      if(ch!==","){if(ch==="\r"&&text[i+1]==="\n")i++;finishRow();}
+    } else if(ch==='"'){
+      if(started||closed) throw new Error("The CSV has an unexpected quote. Export the route again from the planner.");
+      quoted=true;started=true;
+    } else {
+      if(closed) throw new Error("The CSV has text after a closing quote. Export the route again from the planner.");
+      field+=ch;started=true;
+    }
+  }
+  if(quoted) throw new Error("The CSV has an unfinished quoted field. Export the route again from the planner.");
+  if(started||closed||row.length){finishField();finishRow();}
+  return rows;
+}
+function validateRoute(items){
+  if(!Array.isArray(items)||!items.length) throw new Error("No route stops found. Mark X and enter Route Order in the planner, then export the route.");
+  const ids=new Set();
+  items.forEach((p,i)=>{
+    if(!p||[p.id,p.address,p.city].some(v=>typeof v!=="string"||!v.trim())) throw new Error("Stop "+(i+1)+" needs a Prop ID, address and city/state/ZIP.");
+    if(ids.has(p.id.toUpperCase())) throw new Error("Duplicate Prop ID "+p.id+". Each assignment must have its own Prop ID; different apartments may share a street address.");
+    ids.add(p.id.toUpperCase());
+  });
+  return items;
+}
+function parseRouteCSV(text){
+  const rows=parseCSV(text);
+  if(!rows.length) throw new Error("The selected CSV is empty.");
+  const headers=rows.shift().map(h=>h.trim().toLowerCase());
+  if(new Set(headers).size!==headers.length) throw new Error("The CSV has duplicate column headers.");
+  const required=["route order","prop id","property address","city","state","zip"];
+  for(const header of required) if(!headers.includes(header)) throw new Error("Choose BPO_iPad_Route.csv exported by the planner. Missing column: "+header+".");
+  const at=Object.fromEntries(required.map(h=>[h,headers.indexOf(h)]));
+  const orders=new Set();
+  const items=rows.map((r,i)=>{
+    if(r.length!==headers.length) throw new Error("CSV row "+(i+2)+" has the wrong number of columns.");
+    const get=name=>r[at[name]].trim();
+    const raw=get("route order"),order=Number(raw);
+    if(!/^\d+$/.test(raw)||!Number.isSafeInteger(order)||order<1) throw new Error("CSV row "+(i+2)+" needs a positive whole Route Order.");
+    if(orders.has(order)) throw new Error("Duplicate Route Order "+order+". Correct it in the planner and export again.");
+    orders.add(order);
+    if(!get("city")||!get("state")||!get("zip")) throw new Error("CSV row "+(i+2)+" needs City, State and Zip.");
+    return {id:get("prop id"),address:get("property address"),city:get("city")+", "+get("state")+" "+get("zip"),order};
+  });
+  items.sort((a,b)=>a.order-b.order);
+  return validateRoute(items);
+}
+function parseRoute(text){
+  const items=text.split(/\r?\n/).map(line=>line.trim()).filter(Boolean).map((line,i)=>{
+    const parts=line.split("|").map(p=>p.trim());
+    if(parts.length!==3) throw new Error("Pasted line "+(i+1)+" must be Prop ID | Address | City, State ZIP.");
+    return {id:parts[0],address:parts[1],city:parts[2]};
+  });
+  return validateRoute(items);
+}
+function activateRoute(items,source){
+  validateRoute(items);
+  // Store only route metadata; never remove or overwrite inspection:<Prop ID> entries.
+  try {localStorage.setItem("bpoRoute",JSON.stringify(items));}
+  catch(error) {throw new Error("This browser could not save the new route. Your existing route was kept. Save your inspections to files before checking browser storage.");}
+  route=items; current=null; showRoute();
+  showStatus("Loaded "+route.length+" stops from "+source+". Saved inspections were kept.");
+}
+
 function showRoute(){
   document.getElementById("setup").classList.add("hidden");
   document.getElementById("formScreen").classList.add("hidden");
@@ -139,14 +234,17 @@ function showRoute(){
   const list=document.getElementById("routeList"); list.innerHTML="";
   route.forEach((p,i)=>{
     const b=document.createElement("button"); b.type="button"; b.className="route";
-    b.innerHTML="<b>"+p.address+"</b><span>"+p.city+" · Prop ID "+p.id+"</span>";
-    b.addEventListener("click",()=>openProperty(i)); list.appendChild(b);
+    const address=document.createElement("b"); address.textContent=(i+1)+". "+p.address;
+    const meta=document.createElement("span"); meta.textContent=p.city+" · Prop ID "+p.id;
+    b.append(address,meta);
+    b.addEventListener("click",()=>runAction(()=>openProperty(i))); list.appendChild(b);
   });
   document.getElementById("routeCount").textContent=route.length+" properties";
 }
 function openProperty(i){
-  current=route[i];
-  answers=JSON.parse(localStorage.getItem("inspection:"+current.id)||"{}");
+  const saved=JSON.parse(localStorage.getItem("inspection:"+route[i].id)||"{}");
+  if(!saved || typeof saved!=="object" || Array.isArray(saved)) throw new Error("Saved inspection could not be read. It has not been changed.");
+  current=route[i]; answers=saved; document.getElementById("inspectionStatus").textContent="";
   document.getElementById("routeScreen").classList.add("hidden");
   document.getElementById("formScreen").classList.remove("hidden");
   document.getElementById("subjectLine").textContent=current.address;
@@ -159,13 +257,21 @@ function saveCurrent(){
   if(!current) return;
   document.querySelectorAll("[data-text]").forEach(t=>answers["text."+t.dataset.text]=t.value);
   answers._subject=current; answers._saved=new Date().toISOString();
-  localStorage.setItem("inspection:"+current.id,JSON.stringify(answers));
+  try {
+    localStorage.setItem("inspection:"+current.id,JSON.stringify(answers));
+    return true;
+  } catch(error) {
+    showStatus("Could not save in this browser. Keep this page open and use Save Inspection File to save a copy.",true);
+    return false;
+  }
 }
+function persistCurrent(){ if(current) saveCurrent(); }
 function allAverage(){
   CONDITIONS.forEach(l=>{
     const key="condition."+makeKey(l); answers[key]="Average";
     document.querySelectorAll('[data-key="'+key+'"]').forEach(b=>b.classList.toggle("selected",b.dataset.value==="Average"));
   });
+  persistCurrent();
 }
 function summary(){
   saveCurrent();
@@ -173,29 +279,106 @@ function summary(){
   Object.keys(answers).filter(k=>!k.startsWith("_")).sort().forEach(k=>{const v=answers[k]; if(v) out+=k+": "+v+"\n";});
   return out;
 }
-\nfunction csvEscape(v){\n  v = (v===undefined || v===null) ? "" : String(v);\n  return '"' + v.replace(/"/g,'""') + '"';\n}\nfunction inspectionCSV(){\n  saveCurrent();\n  const fields = [\n    ["PROP_ID", current.id],\n    ["ADDRESS", current.address],\n    ["CITY_STATE_ZIP", current.city],\n    ["NEIGHBORHOOD_CLEANLINESS", answers["neighborhood.cleanliness"] || ""],\n    ["NEIGHBORHOOD_STREETS_PUBLIC_SPACES", answers["neighborhood.streets_public_spaces"] || ""],\n    ["NEIGHBORHOOD_HOME_MAINTENANCE", answers["neighborhood.home_maintenance"] || ""],\n    ["NEIGHBORHOOD_TYPE", answers["neighborhood.neighborhood_type"] || ""],\n    ["NEIGHBORHOOD_INFLUENCE_AMENITIES", answers["neighborhood.influence_amenities"] || ""],\n    ["NEIGHBORHOOD_NEGATIVE_INFLUENCE", answers["neighborhood.negative_influence"] || ""],\n    ["NEIGHBORHOOD_PERIMETER_ACCESS", answers["neighborhood.perimeter_access"] || ""],\n    ["SUBJECT_COLOR", answers["subject.color"] || ""],\n    ["SUBJECT_PROPERTY_TYPE", answers["subject.property_type"] || ""],\n    ["SUBJECT_CONSTRUCTION", answers["subject.construction"] || ""],\n    ["SUBJECT_FLOORS", answers["subject.floors"] || ""],\n    ["SUBJECT_STYLE", answers["subject.style"] || ""],\n    ["SUBJECT_ROOF", answers["subject.roof"] || ""],\n    ["SUBJECT_PARKING", answers["subject.parking"] || ""],\n    ["CONDITION_ROOF", answers["condition.roof"] || ""],\n    ["CONDITION_TRIM", answers["condition.trim"] || ""],\n    ["CONDITION_EXTERIOR_PAINT", answers["condition.exterior_paint"] || ""],\n    ["CONDITION_WINDOWS", answers["condition.windows"] || ""],\n    ["CONDITION_FRONT_DOOR", answers["condition.front_door"] || ""],\n    ["CONDITION_AWNINGS", answers["condition.awnings"] || ""],\n    ["CONDITION_FENCE", answers["condition.fence"] || ""],\n    ["CONDITION_LAWN_LANDSCAPE", answers["condition.lawn_landscape"] || ""],\n    ["CONDITION_OVERALL", answers["condition.overall_condition"] || ""],\n    ["COMMENTS_SUBJECT_CONDITION", answers["text.subject_condition"] || ""],\n    ["COMMENTS_NEGATIVE_CONDITIONS", answers["text.negative_conditions"] || ""],\n    ["COMMENTS_REPAIRS_NEEDED", answers["text.repairs_needed"] || ""],\n    ["COMMENTS_REPAIRS_RECOMMENDED", answers["text.repairs_recommended"] || ""],\n    ["COMMENTS_ASSIGNMENT", answers["text.assignment_comments"] || ""],\n    ["SAVED_AT", answers["_saved"] || new Date().toISOString()]\n  ];\n  const header = fields.map(x=>csvEscape(x[0])).join(",");\n  const row = fields.map(x=>csvEscape(x[1])).join(",");\n  return header + "\\r\\n" + row + "\\r\\n";\n}\nfunction safeFilePart(s){\n  return String(s||"").trim().replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"");\n}\nasync function saveInspectionFile(){\n  if(!current) return;\n  const csv = inspectionCSV();\n  const filename = safeFilePart(current.id) + "_" + safeFilePart(current.address) + "_Inspection.csv";\n  const file = new File([csv], filename, {type:"text/csv;charset=utf-8"});\n  try{\n    if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){\n      await navigator.share({files:[file],title:"BPO Inspection",text:"Save this inspection CSV to Dropbox / Inspections."});\n      return;\n    }\n  }catch(e){ if(e && e.name==="AbortError") return; }\n  const url = URL.createObjectURL(file);\n  const a = document.createElement("a");\n  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();\n  setTimeout(()=>URL.revokeObjectURL(url),1500);\n  alert("Inspection file created. If the Share sheet did not appear, check the iPad Downloads folder.");\n}\n
+
+function csvEscape(v){
+  v = (v===undefined || v===null) ? "" : String(v);
+  return '"' + v.replace(/"/g,'""') + '"';
+}
+function inspectionCSV(){
+  saveCurrent();
+  const fields = [
+    ["PROP_ID", current.id],
+    ["ADDRESS", current.address],
+    ["CITY_STATE_ZIP", current.city],
+    ["NEIGHBORHOOD_CLEANLINESS", answers["neighborhood.cleanliness"] || ""],
+    ["NEIGHBORHOOD_STREETS_PUBLIC_SPACES", answers["neighborhood.streets_public_spaces"] || ""],
+    ["NEIGHBORHOOD_HOME_MAINTENANCE", answers["neighborhood.home_maintenance"] || ""],
+    ["NEIGHBORHOOD_TYPE", answers["neighborhood.neighborhood_type"] || ""],
+    ["NEIGHBORHOOD_INFLUENCE_AMENITIES", answers["neighborhood.influence_amenities"] || ""],
+    ["NEIGHBORHOOD_NEGATIVE_INFLUENCE", answers["neighborhood.negative_influence"] || ""],
+    ["NEIGHBORHOOD_PERIMETER_ACCESS", answers["neighborhood.perimeter_access"] || ""],
+    ["SUBJECT_COLOR", answers["subject.color"] || ""],
+    ["SUBJECT_PROPERTY_TYPE", answers["subject.property_type"] || ""],
+    ["SUBJECT_CONSTRUCTION", answers["subject.construction"] || ""],
+    ["SUBJECT_FLOORS", answers["subject.floors"] || ""],
+    ["SUBJECT_STYLE", answers["subject.style"] || ""],
+    ["SUBJECT_ROOF", answers["subject.roof"] || ""],
+    ["SUBJECT_PARKING", answers["subject.parking"] || ""],
+    ["CONDITION_ROOF", answers["condition.roof"] || ""],
+    ["CONDITION_TRIM", answers["condition.trim"] || ""],
+    ["CONDITION_EXTERIOR_PAINT", answers["condition.exterior_paint"] || ""],
+    ["CONDITION_WINDOWS", answers["condition.windows"] || ""],
+    ["CONDITION_FRONT_DOOR", answers["condition.front_door"] || ""],
+    ["CONDITION_AWNINGS", answers["condition.awnings"] || ""],
+    ["CONDITION_FENCE", answers["condition.fence"] || ""],
+    ["CONDITION_LAWN_LANDSCAPE", answers["condition.lawn_landscape"] || ""],
+    ["CONDITION_OVERALL", answers["condition.overall_condition"] || ""],
+    ["COMMENTS_SUBJECT_CONDITION", answers["text.subject_condition"] || ""],
+    ["COMMENTS_NEGATIVE_CONDITIONS", answers["text.negative_conditions"] || ""],
+    ["COMMENTS_REPAIRS_NEEDED", answers["text.repairs_needed"] || ""],
+    ["COMMENTS_REPAIRS_RECOMMENDED", answers["text.repairs_recommended"] || ""],
+    ["COMMENTS_ASSIGNMENT", answers["text.assignment_comments"] || ""],
+    ["SAVED_AT", answers["_saved"] || new Date().toISOString()]
+  ];
+  const header = fields.map(x=>csvEscape(x[0])).join(",");
+  const row = fields.map(x=>csvEscape(x[1])).join(",");
+  return header + "\r\n" + row + "\r\n";
+}
+function safeFilePart(s){
+  return String(s||"").trim().replace(/[^A-Za-z0-9]+/g,"_").replace(/^_+|_+$/g,"");
+}
+async function saveInspectionFile(){
+  if(!current) return;
+  const csv = inspectionCSV();
+  const filename = safeFilePart(current.id) + "_" + safeFilePart(current.address) + "_Inspection.csv";
+  const file = new File(["\uFEFF",csv], filename, {type:"text/csv;charset=utf-8"});
+  try{
+    if(navigator.canShare && navigator.canShare({files:[file]}) && navigator.share){
+      await navigator.share({files:[file],title:"BPO Inspection",text:"Save this inspection CSV to Dropbox / Inspections."});
+      showStatus("Share sheet closed. Confirm that the file is saved in Dropbox / Inspections before importing it in the planner.");
+      return;
+    }
+  }catch(e){ if(e && e.name==="AbortError") {showStatus("File sharing canceled. No file was confirmed saved to Dropbox.");return;} }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+  showStatus("Inspection file downloaded. Move it from Downloads to Dropbox / Inspections, then import it in the planner.");
+}
+
 renderFormFields();
-document.getElementById("loadRoute").addEventListener("click",()=>{
-  const parsed=parseRoute(document.getElementById("routeInput").value);
-  if(!parsed.length){alert("Enter at least one property using: Prop ID | Address | City, State ZIP");return}
-  route=parsed; localStorage.setItem("bpoRoute",JSON.stringify(route)); showRoute();
+document.getElementById("chooseRouteCSV").addEventListener("click",()=>document.getElementById("routeCSVFile").click());
+document.getElementById("routeCSVFile").addEventListener("change",async event=>{
+  const file=event.target.files[0]; if(!file) return;
+  const button=document.getElementById("chooseRouteCSV"); button.disabled=true;
+  try {
+    if(file.size>5*1024*1024) throw new Error("This file is too large for a daily route. Choose the planner's BPO_iPad_Route.csv.");
+    const parsed=parseRouteCSV(await file.text());
+    activateRoute(parsed,file.name);
+  } catch(error) { showStatus(error.message,true); }
+  finally { button.disabled=false; event.target.value=""; }
 });
-document.getElementById("restoreRoute").addEventListener("click",()=>{
-  route=JSON.parse(localStorage.getItem("bpoRoute")||"[]");
-  if(!route.length){alert("No saved route found on this iPad.");return} showRoute();
-});
+document.getElementById("loadRoute").addEventListener("click",()=>runAction(()=>activateRoute(parseRoute(document.getElementById("routeInput").value),"pasted route")));
+document.getElementById("restoreRoute").addEventListener("click",()=>runAction(()=>{
+  const saved=JSON.parse(localStorage.getItem("bpoRoute")||"[]");
+  validateRoute(saved); route=saved; current=null; showRoute();
+  showStatus("Restored "+route.length+" saved stops.");
+}));
 document.getElementById("editRoute").addEventListener("click",()=>{
   document.getElementById("routeInput").value=route.map(p=>p.id+" | "+p.address+" | "+p.city).join("\n");
   document.getElementById("routeScreen").classList.add("hidden"); document.getElementById("setup").classList.remove("hidden");
 });
-document.getElementById("backRoute").addEventListener("click",()=>{saveCurrent();showRoute()});
-document.getElementById("saveInspection").addEventListener("click",()=>{saveCurrent();alert("Inspection saved on this iPad.")});
+document.getElementById("backRoute").addEventListener("click",()=>{if(saveCurrent()) {showRoute();showStatus("Inspection saved on this device. Use Save Inspection File to send it back to the planner.");}});
+document.getElementById("saveInspection").addEventListener("click",()=>{if(saveCurrent()) showStatus("Inspection saved on this device. Use Save Inspection File to send it back to the planner.");});
+document.querySelectorAll("[data-text]").forEach(t=>t.addEventListener("input",persistCurrent));
+document.querySelectorAll("[data-text]").forEach(t=>t.setAttribute("aria-label",t.previousElementSibling.textContent));
 document.getElementById("allAverage").addEventListener("click",allAverage);
-document.getElementById("saveFile").addEventListener("click",saveInspectionFile);
+document.getElementById("saveFile").addEventListener("click",()=>runAction(saveInspectionFile));
 document.getElementById("copySummary").addEventListener("click",async()=>{
-  const txt=summary(); try{await navigator.clipboard.writeText(txt); alert("Field summary copied.");}
+  const txt=summary(); try{await navigator.clipboard.writeText(txt); showStatus("Field summary copied.");}
   catch(e){prompt("Copy this summary:",txt)}
 });
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden") persistCurrent();});
 </script>
 </body>
 </html>
